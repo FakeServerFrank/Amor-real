@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>RespondeIA</title>
+<style>
+:root{--bg:#f6f4fb;--card:#fff;--tx:#1d1b26;--mu:#6b6880;--ac:#6c4cf1;--ac2:#ff6fb1;--bd:#e5e1f2;--ok:#1f9d6b;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#13111c;--card:#1d1a2b;--tx:#f1eefc;--mu:#a29fba;--bd:#2d2a42;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#13111c;--card:#1d1a2b;--tx:#f1eefc;--mu:#a29fba;--bd:#2d2a42;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background-color:var(--bg)}
+main{max-width:520px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:26px;margin:4px 0 2px;background:linear-gradient(90deg,var(--ac),var(--ac2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.sub{color:var(--mu);margin:0 0 18px;font-size:14px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:18px;padding:16px;margin-bottom:14px}
+.drop{border:2px dashed var(--bd);border-radius:16px;padding:26px 12px;text-align:center;color:var(--mu);cursor:pointer}
+.drop b{display:block;color:var(--tx);font-size:17px;margin-bottom:4px}
+.drop img{max-width:100%;max-height:260px;border-radius:12px}
+.lbl{font-size:13px;color:var(--mu);margin:14px 0 6px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:1px solid var(--bd);background:transparent;color:var(--tx);padding:8px 12px;border-radius:999px;font-size:14px;cursor:pointer}
+.chip.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+textarea{width:100%;border:1px solid var(--bd);background:transparent;color:var(--tx);border-radius:12px;padding:10px;font:inherit;resize:vertical;min-height:56px}
+.go{width:100%;margin-top:16px;padding:14px;border:0;border-radius:14px;background:linear-gradient(90deg,var(--ac),var(--ac2));color:#fff;font-size:17px;font-weight:600;cursor:pointer}
+.go:disabled{opacity:.5}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.tag{background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:3px 9px;font-size:13px}
+.rep{border:1px solid var(--bd);border-radius:14px;padding:12px;margin-top:10px}
+.rep h3{margin:0 0 6px;font-size:13px;color:var(--ac);text-transform:uppercase;letter-spacing:.04em}
+.rep p{margin:0 0 10px;font-size:16px}
+.cp{border:1px solid var(--bd);background:transparent;color:var(--tx);border-radius:10px;padding:6px 12px;font-size:14px;cursor:pointer}
+.cp.ok{color:var(--ok);border-color:var(--ok)}
+.err{color:#d6335c;font-size:14px;margin-top:10px}
+.note{color:var(--mu);font-size:12px;text-align:center;margin-top:18px}
+</style>
+</head>
+<body>
+<main>
+  <h1>RespondeIA 💬</h1>
+  <p class="sub">Sube una captura de tu chat y te sugiero qué responder, según el estilo de la conversación.</p>
+
+  <div class="card">
+    <div class="drop" id="drop"><b>📷 Subir captura</b>Toca para elegir una imagen</div>
+    <input type="file" id="file" accept="image/*" hidden>
+
+    <div class="lbl">¿Con quién hablas?</div>
+    <div class="chips" id="rel"></div>
+    <div class="lbl">¿Qué quieres lograr?</div>
+    <div class="chips" id="goal"></div>
+    <div class="lbl">Contexto extra (opcional)</div>
+    <textarea id="ctx" placeholder="Ej: hace días que no hablamos..."></textarea>
+    <button class="go" id="go" disabled>Sugerir respuestas</button>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div id="out"></div>
+  <p class="note">Pensado para chats entre adultos (20+). Las capturas se procesan con Gemini (Google) y pueden usarse para mejorar sus modelos: no subas datos sensibles ni información privada de otras personas.</p>
+</main>
+<script>
+const REL=["Pareja / cita","Amistad","Trabajo","Familia","Otro"];
+const GOAL=["Responder natural","Ligar con respeto","Arreglar un malentendido","Decir que no","Mantener la charla"];
+const sel={rel:REL[1],goal:GOAL[0]};
+let blob=null,sample=null;
+
+function chips(id,arr,key){
+  const el=document.getElementById(id);
+  arr.forEach(t=>{const b=document.createElement("button");b.className="chip"+(sel[key]===t?" on":"");b.textContent=t;
+    b.onclick=()=>{sel[key]=t;[...el.children].forEach(c=>c.classList.toggle("on",c===b))};el.appendChild(b)});
+}
+chips("rel",REL,"rel");chips("goal",GOAL,"goal");
+
+const file=document.getElementById("file"),drop=document.getElementById("drop"),go=document.getElementById("go"),err=document.getElementById("err"),out=document.getElementById("out");
+drop.onclick=()=>file.click();
+file.onchange=async()=>{
+  const f=file.files[0];if(!f)return;
+  try{blob=await shrink(f);}catch(e){err.textContent="No pude leer esa imagen.";return}
+  drop.innerHTML="";const im=document.createElement("img");im.src=URL.createObjectURL(blob);drop.appendChild(im);
+  go.disabled=false;err.textContent="";
+};
+function shrink(f){return new Promise((res,rej)=>{
+  const img=new Image();img.onload=()=>{
+    const m=1400,s=Math.min(1,m/Math.max(img.width,img.height));
+    const c=document.createElement("canvas");c.width=img.width*s;c.height=img.height*s;
+    c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+    c.toBlob(b=>b?res(b):rej(),"image/jpeg",.85)};
+  img.onerror=rej;img.src=URL.createObjectURL(f)})}
+
+function toB64(b){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=rej;r.readAsDataURL(b)})}
+
+go.onclick=async()=>{
+  err.textContent="";out.innerHTML="";
+  go.disabled=true;go.textContent="Analizando...";
+  try{
+    const res=await fetch("/api/analizar",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({image:await toB64(blob),rel:sel.rel,goal:sel.goal,ctx:document.getElementById("ctx").value.slice(0,500)})});
+    const d=await res.json().catch(()=>({}));
+    if(!res.ok)throw {message:d.error||"Error del servidor ("+res.status+")."};
+    render(d);
+  }catch(e){err.textContent=(e&&e.message)||"Algo falló, inténtalo de nuevo."}
+  go.disabled=false;go.textContent="Sugerir respuestas";
+};
+
+function render(d){
+  const c=document.createElement("div");c.className="card";
+  const h=document.createElement("b");h.textContent="Estilo del chat";c.appendChild(h);
+  const tg=document.createElement("div");tg.className="tags";
+  (d.estilo||[]).forEach(s=>{const x=document.createElement("span");x.className="tag";x.textContent=s;tg.appendChild(x)});c.appendChild(tg);
+  const p=document.createElement("p");p.style.margin="4px 0";p.textContent=d.resumen||"";c.appendChild(p);
+  (d.respuestas||[]).forEach(r=>{
+    const b=document.createElement("div");b.className="rep";
+    const h3=document.createElement("h3");h3.textContent=r.tipo;
+    const pp=document.createElement("p");pp.textContent=r.texto;
+    const bt=document.createElement("button");bt.className="cp";bt.textContent="Copiar";
+    bt.onclick=async()=>{try{await navigator.clipboard.writeText(r.texto)}catch(e){
+      const ta=document.createElement("textarea");ta.value=r.texto;document.body.appendChild(ta);ta.select();try{document.execCommand("copy")}catch(_){}ta.remove()}
+      bt.textContent="Copiado ✓";bt.classList.add("ok");setTimeout(()=>{bt.textContent="Copiar";bt.classList.remove("ok")},1500)};
+    b.append(h3,pp,bt);c.appendChild(b)});
+  if(d.consejo){const k=document.createElement("p");k.style.cssText="margin:14px 0 0;color:var(--mu);font-size:14px";k.textContent="💡 "+d.consejo;c.appendChild(k)}
+  if(d.aviso){const k=document.createElement("p");k.className="err";k.textContent="⚠️ "+d.aviso;c.appendChild(k)}
+  out.appendChild(c);c.scrollIntoView({behavior:"smooth"});
+}
+</script>
+</body>
+</html>
